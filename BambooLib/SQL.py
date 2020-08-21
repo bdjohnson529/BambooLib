@@ -87,39 +87,38 @@ def executeQueryFromFile(server_name, db_name, file_name):
     return df
 
 
-def writeDfToSQL(df, server, database, table, driver='SQL+Server', chunksize=200):
+def writeDfToSql(server, database, table, df):
     """
-    Wrapper for pd.to_sql()
+    Writes a pandas dataframe to a SQL server instance, using the BCP utility.
 
-    :param df: table
+    :param server: Server name
+    :type server: str
+    :param database: Database name
+    :type database: str
+    :param df: dataframe
     :type df: pd.DataFrame
-    :param server_name: Server name
-    :type server_name: str
-    :param db_name: Database name
-    :type db_name: str
-    :param table_name: Database name
-    :type table_name: str
     """
+    if server not in ('KSITEST', 'KSISTAGING'):
+        print("Write permitted only on KISTEST, KSISTAGING")
+        return False
 
-    # initialize SQL engine
-    if(True):
-        connection_str = 'mssql+pyodbc://' + server_name + '/' + db_name + '?driver=' + driver
-        engine = sqlalchemy.create_engine(connection_str)
-    else:
-        params = urllib.parse.quote_plus('DRIVER={SQL Server};SERVER=' + server + ';DATABASE=' + db)
-        engine = sqlalchemy.create_engine("mssql+pyodbc:///?odbc_connect=%s" % params)
-
-    start = time.time()
-
-    # table name needs to be lower case
-    table_name = table_name.lower()
-
-    df.to_sql(table_name, con=engine,
-                      if_exists='replace', index=False,
-                      method='multi', chunksize=chunksize)
+    # write dataframe to temp file
+    os.makedirs('tmp', exist_ok=True)
+    tmp_file = os.path.abspath("tmp/" + randomWord(10) + ".txt")
 
 
-    end = time.time()
+    # truncate table on destination server
+    query = f"TRUNCATE TABLE {database}.dbo.{table}"
+    cmd = f"sqlcmd -S {server} -h -1 -Q \"{query}\""
+    os.system(cmd)
 
-    # diagnostic timing
-    print("Write time :\t", int(end - start), " s")
+    # write df to temp file
+    df.to_csv(tmp_file, index=False, sep="|")
+
+    # upload temp file to destination server
+    cmd = f"bcp {database}.dbo.{table} in \"{tmp_file}\" -c -T -t\"|\" -S {server}"
+    os.system(cmd)
+
+
+    # delete temp file
+    shutil.rmtree('tmp')
